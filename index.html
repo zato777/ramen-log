@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ラーメン記録アプリ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>ラーメン記録アプリ</h1>
+
+  <div class="login">
+    <input type="text" id="username" placeholder="ユーザー名を入力">
+    <button onclick="login()">ログイン</button>
+    <p class="note">※ ユーザー名を入力すると記録が読み込まれます</p>
+  </div>
+
+  <div id="app" style="display: none;">
+    <form id="ramenForm">
+      <div style="text-align: right;">
+        <button onclick="logout()">ログアウト</button>
+      </div>      
+      <input type="text" id="shopName" placeholder="店名" required><br>
+      <input type="date" id="date" required><br>
+      <input type="text" id="type" placeholder="ラーメンの種類"><br>
+      <input type="number" id="rating" placeholder="評価（1〜5）" min="1" max="5"><br>
+      <textarea id="memo" placeholder="メモ"></textarea><br>
+      <input type="file" id="photo"><br>
+      <button type="submit">記録する</button>
+    </form>
+
+    <hr>
+    <div id="ramenList"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

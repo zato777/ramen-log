@@ -1,0 +1,54 @@
+body {
+  font-family: sans-serif;
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 0 15px;
+  background-color: #fff8f0;
+}
+
+h1 {
+  text-align: center;
+  color: #b33;
+}
+
+form input, form textarea, form button {
+  width: 100%;
+  margin: 5px 0;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+button {
+  background-color: #f85a40;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #d64832;
+}
+
+.card {
+  background: #ffe;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-left: 4px solid #f85a40;
+  border-radius: 6px;
+}
+
+img {
+  margin-top: 10px;
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.note {
+  font-size: 0.9em;
+  color: gray;
+  margin-top: 5px;
+}
