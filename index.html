@@ -19,6 +19,13 @@
   </div>
 
   <div id="app" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <p><strong>現在のユーザー：</strong><span id="currentUserDisplay"></span></p>
+      <div>
+        <input type="text" id="newUsername" placeholder="新しいユーザー名">
+        <button onclick="changeUsername()">ユーザー名変更</button>
+      </div>
+    </div>
     <form id="ramenForm">
       <div style="text-align: right;">
         <button onclick="logout()">ログアウト</button>

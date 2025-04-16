@@ -21,6 +21,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById("app").style.display = "block";
     loadRamenList();
   }
+  updateCurrentUserDisplay();  // ユーザー名表示を更新
 });
 
 // ログイン処理
@@ -35,6 +36,7 @@ function login() {
   document.getElementById("app").style.display = "block";
 
   loadRamenList();
+  updateCurrentUserDisplay();  // ユーザー名表示を更新
 }
 
 // ログアウト処理
@@ -46,6 +48,8 @@ function logout() {
   document.querySelector(".login").style.display = "block";
   document.getElementById("ramenList").innerHTML = "";
   document.getElementById("username").value = "";
+
+  updateCurrentUserDisplay();  // ユーザー名表示を更新
 }
 
 // 登録処理
@@ -162,6 +166,39 @@ function deleteRamen(index) {
       ramenRef.set({ list: ramenList }).then(() => {
         loadRamenList();
       });
+    }
+  });
+}
+
+//ユーザー表示更新関数を追加
+function updateCurrentUserDisplay() {
+  document.getElementById("currentUserDisplay").textContent = currentUser || "";
+}
+
+function changeUsername() {
+  const newUsername = document.getElementById("newUsername").value.trim();
+  if (!newUsername) return alert("新しいユーザー名を入力してください");
+  if (newUsername === currentUser) return alert("同じ名前です");
+
+  // データをコピーして、新しいユーザーに保存し、古いユーザーを削除
+  const oldRef = db.collection("ramenLogs").doc(currentUser);
+  const newRef = db.collection("ramenLogs").doc(newUsername);
+
+  oldRef.get().then(doc => {
+    if (doc.exists) {
+      const data = doc.data();
+      newRef.set(data).then(() => {
+        oldRef.delete().then(() => {
+          currentUser = newUsername;
+          localStorage.setItem("currentUser", currentUser);
+          updateCurrentUserDisplay();
+          document.getElementById("newUsername").value = "";
+          loadRamenList();
+          alert("ユーザー名を変更しました");
+        });
+      });
+    } else {
+      alert("元のデータが見つかりませんでした");
     }
   });
 }
