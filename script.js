@@ -12,7 +12,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-let currentUser = null;
+let currentUser = localStorage.getItem('currentUser') || null;
 let editIndex = -1;
 
 // ログイン処理
@@ -20,9 +20,9 @@ function login() {
   const username = document.getElementById("username").value.trim();
   if (!username) return alert("ユーザー名を入力してください");
 
-  // ローカルストレージにユーザー名を保存
+  // ログインユーザーをlocalStorageに保存
   localStorage.setItem('currentUser', username);
-  
+
   currentUser = username;
   document.getElementById("app").style.display = "block";
   loadRamenList();  // ラーメンリストを読み込む
@@ -39,6 +39,10 @@ function logout() {
 
 // ラーメンリストをリアルタイムで読み込む処理（onSnapshot使用）
 function loadRamenList() {
+  if (!currentUser) {
+    return;  // ユーザーがログインしていない場合は何もしない
+  }
+
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
 
   ramenRef.onSnapshot((doc) => {
