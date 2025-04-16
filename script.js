@@ -8,49 +8,104 @@ const firebaseConfig = {
   measurementId: "G-JHDWG2BPFJ"
 };
 
-// Firebase 初期化
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 let currentUser = localStorage.getItem('currentUser') || null;
 let editIndex = -1;
 
+// ページ読み込み時にログイン状態を復元
+window.addEventListener('DOMContentLoaded', () => {
+  if (currentUser) {
+    document.querySelector(".login").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    loadRamenList();
+  }
+});
+
 // ログイン処理
 function login() {
   const username = document.getElementById("username").value.trim();
   if (!username) return alert("ユーザー名を入力してください");
 
-  // ログインユーザーをlocalStorageに保存
-  localStorage.setItem('currentUser', username);
-
   currentUser = username;
+  localStorage.setItem('currentUser', currentUser);
+
+  document.querySelector(".login").style.display = "none";
   document.getElementById("app").style.display = "block";
-  loadRamenList();  // ラーメンリストを読み込む
+
+  loadRamenList();
 }
 
 // ログアウト処理
 function logout() {
-  localStorage.removeItem('currentUser');  // ログアウト時にユーザー名を削除
   currentUser = null;
+  localStorage.removeItem('currentUser');
+
   document.getElementById("app").style.display = "none";
+  document.querySelector(".login").style.display = "block";
   document.getElementById("ramenList").innerHTML = "";
   document.getElementById("username").value = "";
 }
 
-// ラーメンリストをリアルタイムで読み込む処理（onSnapshot使用）
-function loadRamenList() {
-  if (!currentUser) {
-    return;  // ユーザーがログインしていない場合は何もしない
+// 登録処理
+document.getElementById("ramenForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+
+  const reader = new FileReader();
+  const file = document.getElementById("photo").files[0];
+
+  reader.onload = function(event) {
+    const ramen = {
+      shopName: document.getElementById("shopName").value,
+      date: document.getElementById("date").value,
+      type: document.getElementById("type").value,
+      rating: document.getElementById("rating").value,
+      memo: document.getElementById("memo").value,
+      photo: event.target.result || null
+    };
+
+    const ramenRef = db.collection("ramenLogs").doc(currentUser);
+
+    ramenRef.get().then((doc) => {
+      let ramenList = doc.exists ? doc.data().list : [];
+
+      if (editIndex >= 0) {
+        if (!ramen.photo) {
+          ramen.photo = ramenList[editIndex].photo;
+        }
+        ramenList[editIndex] = ramen;
+        editIndex = -1;
+        document.querySelector("#ramenForm button").textContent = "記録する";
+      } else {
+        ramenList.push(ramen);
+      }
+
+      ramenRef.set({ list: ramenList }).then(() => {
+        loadRamenList();
+        e.target.reset();
+      });
+    });
+  };
+
+  if (file) {
+    reader.readAsDataURL(file);
+  } else {
+    reader.onload({ target: { result: null } });
   }
+});
+
+// ラーメンリストの読み込み
+function loadRamenList() {
+  const container = document.getElementById("ramenList");
+  container.innerHTML = "";
+
+  if (!currentUser) return;
 
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-  ramenRef.onSnapshot((doc) => {
-    const container = document.getElementById("ramenList");
-    container.innerHTML = "";  // 既存のリストをクリア
-
+  ramenRef.get().then((doc) => {
     if (doc.exists) {
-      const list = doc.data().list || [];  // リストが存在しない場合は空配列
+      const list = doc.data().list || [];
 
       list.forEach((ramen, index) => {
         container.innerHTML += `
@@ -102,10 +157,10 @@ function deleteRamen(index) {
   ramenRef.get().then((doc) => {
     if (doc.exists) {
       let ramenList = doc.data().list;
-      ramenList.splice(index, 1);  // リストから削除
+      ramenList.splice(index, 1);
 
       ramenRef.set({ list: ramenList }).then(() => {
-        loadRamenList();  // リストを再読み込み
+        loadRamenList();
       });
     }
   });
