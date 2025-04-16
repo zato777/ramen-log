@@ -1,4 +1,36 @@
+const firebaseConfig = {
+  apiKey: "AIzaSyAvsjD4dsX9g-H9Hd7bAHUIYNAGLapMTj0",
+  authDomain: "ramen-log-b811d.firebaseapp.com",
+  projectId: "ramen-log-b811d",
+  storageBucket: "ramen-log-b811d.firebasestorage.app",
+  messagingSenderId: "715408643600",
+  appId: "1:715408643600:web:24adef805672ebf0169c95",
+  measurementId: "G-JHDWG2BPFJ"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
 let currentUser = null;
+let editIndex = -1;
+
+
+// 保存（ログイン後）
+db.collection("ramenLogs")
+  .doc(currentUser)
+  .set({ list: ramenList })
+  .then(() => console.log("保存完了"));
+
+  // 読み込み
+db.collection("ramenLogs")
+.doc(currentUser)
+.get()
+.then((doc) => {
+  if (doc.exists) {
+    ramenList = doc.data().list;
+    // → 表示処理へ
+  }
+});
 
 function login() {
   const username = document.getElementById("username").value.trim();
@@ -14,8 +46,6 @@ function logout() {
   document.getElementById("ramenList").innerHTML = "";
   document.getElementById("username").value = "";
 }
-
-let editIndex = -1;
 
 // 登録処理
 document.getElementById("ramenForm").addEventListener("submit", function(e) {
@@ -63,33 +93,6 @@ document.getElementById("ramenForm").addEventListener("submit", function(e) {
 });
 
 
-function editRamen(index) {
-  const key = `ramenList_${currentUser}`;
-  const ramenList = JSON.parse(localStorage.getItem(key));
-  const ramen = ramenList[index];
-
-  document.getElementById("shopName").value = ramen.shopName;
-  document.getElementById("date").value = ramen.date;
-  document.getElementById("type").value = ramen.type;
-  document.getElementById("rating").value = ramen.rating;
-  document.getElementById("memo").value = ramen.memo;
-
-  editIndex = index;
-  document.querySelector("#ramenForm button").textContent = "更新する";
-}
-
-
-function deleteRamen(index) {
-  if (!confirm("本当に削除しますか？")) return;
-
-  const key = `ramenList_${currentUser}`;
-  let ramenList = JSON.parse(localStorage.getItem(key));
-  ramenList.splice(index, 1);
-  localStorage.setItem(key, JSON.stringify(ramenList));
-  loadRamenList();
-}
-
-
 function loadRamenList() {
   const key = `ramenList_${currentUser}`;
   const list = JSON.parse(localStorage.getItem(key)) || [];
@@ -113,3 +116,29 @@ function loadRamenList() {
     `;
   });
 }
+
+function editRamen(index) {
+  const key = `ramenList_${currentUser}`;
+  const ramenList = JSON.parse(localStorage.getItem(key));
+  const ramen = ramenList[index];
+
+  document.getElementById("shopName").value = ramen.shopName;
+  document.getElementById("date").value = ramen.date;
+  document.getElementById("type").value = ramen.type;
+  document.getElementById("rating").value = ramen.rating;
+  document.getElementById("memo").value = ramen.memo;
+
+  editIndex = index;
+  document.querySelector("#ramenForm button").textContent = "更新する";
+}
+
+function deleteRamen(index) {
+  if (!confirm("本当に削除しますか？")) return;
+
+  const key = `ramenList_${currentUser}`;
+  let ramenList = JSON.parse(localStorage.getItem(key));
+  ramenList.splice(index, 1);
+  localStorage.setItem(key, JSON.stringify(ramenList));
+  loadRamenList();
+}
+
