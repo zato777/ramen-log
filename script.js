@@ -53,51 +53,54 @@ function logout() {
 }
 
 // 登録処理
+// ファイル読み込み＆縮小してから保存
 document.getElementById("ramenForm").addEventListener("submit", function(e) {
   e.preventDefault();
 
-  const reader = new FileReader();
   const file = document.getElementById("photo").files[0];
 
-  reader.onload = function(event) {
-    const ramen = {
-      shopName: document.getElementById("shopName").value,
-      date: document.getElementById("date").value,
-      type: document.getElementById("type").value,
-      rating: document.getElementById("rating").value,
-      memo: document.getElementById("memo").value,
-      photo: event.target.result || null
-    };
-
-    const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-    ramenRef.get().then((doc) => {
-      let ramenList = doc.exists ? doc.data().list : [];
-
-      if (editIndex >= 0) {
-        if (!ramen.photo) {
-          ramen.photo = ramenList[editIndex].photo;
-        }
-        ramenList[editIndex] = ramen;
-        editIndex = -1;
-        document.querySelector("#ramenForm button").textContent = "記録する";
-      } else {
-        ramenList.push(ramen);
-      }
-
-      ramenRef.set({ list: ramenList }).then(() => {
-        loadRamenList();
-        e.target.reset();
-      });
-    });
-  };
-
   if (file) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.createElement("canvas");
+
+        const maxSize = 800;  // 最大幅または高さ（必要に応じて調整）
+        let width = img.width;
+        let height = img.height;
+
+        // サイズを調整（比率を保ったまま）
+        if (width > height) {
+          if (width > maxSize) {
+            height *= maxSize / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width *= maxSize / height;
+            height = maxSize;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const base64 = canvas.toDataURL("image/jpeg", 0.7);  // 画質調整（0.0〜1.0）
+
+        saveRamen(base64);  // 画像付きで保存
+      };
+      img.src = event.target.result;
+    };
     reader.readAsDataURL(file);
   } else {
-    reader.onload({ target: { result: null } });
+    saveRamen(null);  // 画像なしで保存
   }
 });
+
 
 // ラーメンリストの読み込み
 function loadRamenList() {
@@ -180,25 +183,66 @@ function changeUsername() {
   if (!newUsername) return alert("新しいユーザー名を入力してください");
   if (newUsername === currentUser) return alert("同じ名前です");
 
-  // データをコピーして、新しいユーザーに保存し、古いユーザーを削除
   const oldRef = db.collection("ramenLogs").doc(currentUser);
   const newRef = db.collection("ramenLogs").doc(newUsername);
 
-  oldRef.get().then(doc => {
-    if (doc.exists) {
-      const data = doc.data();
-      newRef.set(data).then(() => {
-        oldRef.delete().then(() => {
-          currentUser = newUsername;
-          localStorage.setItem("currentUser", currentUser);
-          updateCurrentUserDisplay();
-          document.getElementById("newUsername").value = "";
-          loadRamenList();
-          alert("ユーザー名を変更しました");
-        });
-      });
-    } else {
-      alert("元のデータが見つかりませんでした");
+  // まず、新しいユーザー名がすでに使われていないか確認
+  newRef.get().then((newDoc) => {
+    if (newDoc.exists) {
+      alert("そのユーザー名はすでに使われています");
+      return;
     }
+
+    // 新しい名前が空いている → データ移行開始
+    oldRef.get().then(doc => {
+      if (doc.exists) {
+        const data = doc.data();
+        newRef.set(data).then(() => {
+          oldRef.delete().then(() => {
+            currentUser = newUsername;
+            localStorage.setItem("currentUser", currentUser);
+            updateCurrentUserDisplay();
+            document.getElementById("newUsername").value = "";
+            loadRamenList();
+            alert("ユーザー名を変更しました");
+          });
+        });
+      } else {
+        alert("元のデータが見つかりませんでした");
+      }
+    });
+  });
+}
+
+function saveRamen(photoDataUrl) {
+  const ramen = {
+    shopName: document.getElementById("shopName").value,
+    date: document.getElementById("date").value,
+    type: document.getElementById("type").value,
+    rating: document.getElementById("rating").value,
+    memo: document.getElementById("memo").value,
+    photo: photoDataUrl
+  };
+
+  const ramenRef = db.collection("ramenLogs").doc(currentUser);
+
+  ramenRef.get().then((doc) => {
+    let ramenList = doc.exists ? doc.data().list : [];
+
+    if (editIndex >= 0) {
+      if (!ramen.photo) {
+        ramen.photo = ramenList[editIndex].photo;
+      }
+      ramenList[editIndex] = ramen;
+      editIndex = -1;
+      document.querySelector("#ramenForm button").textContent = "記録する";
+    } else {
+      ramenList.push(ramen);
+    }
+
+    ramenRef.set({ list: ramenList }).then(() => {
+      loadRamenList();
+      document.getElementById("ramenForm").reset();
+    });
   });
 }
