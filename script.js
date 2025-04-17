@@ -151,27 +151,82 @@ function editRamen(index) {
 
       editIndex = index;
       document.querySelector("#ramenForm button").textContent = "更新する";
+
+      // スクロールトップ
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   });
 }
 
+
 // 削除処理
+let lastDeletedRamen = null; // グローバルに保持
+
 function deleteRamen(index) {
-  if (!confirm("本当に削除しますか？")) return;
+  const ramenRef = db.collection("ramenLogs").doc(currentUser);
+
+  ramenRef.get().then((doc) => {
+    if (doc.exists) {
+      let ramenList = doc.data().list;
+      const deleted = ramenList[index];
+
+      if (!confirm(`「${deleted.shopName}」を削除しますか？`)) return;
+
+      lastDeletedRamen = { ramen: deleted, index: index }; // 復元用に保存
+      ramenList.splice(index, 1);
+
+      ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
+        loadRamenList();
+        showUndo(); // 復元通知
+      });
+    }
+  });
+}
+
+function showUndo() {
+  const undoBox = document.createElement("div");
+  undoBox.id = "undoBox";
+  undoBox.style.position = "fixed";
+  undoBox.style.bottom = "20px";
+  undoBox.style.left = "50%";
+  undoBox.style.transform = "translateX(-50%)";
+  undoBox.style.backgroundColor = "#eee";
+  undoBox.style.border = "1px solid #ccc";
+  undoBox.style.padding = "10px 20px";
+  undoBox.style.borderRadius = "10px";
+  undoBox.style.boxShadow = "0 2px 5px rgba(0,0,0,0.2)";
+  undoBox.innerHTML = `削除を取り消す <button onclick="undoDelete()">復元</button>`;
+
+  document.body.appendChild(undoBox);
+
+  // 自動で5秒後に消える
+  setTimeout(() => {
+    if (document.getElementById("undoBox")) {
+      document.body.removeChild(undoBox);
+      lastDeletedRamen = null;
+    }
+  }, 5000);
+}
+
+function undoDelete() {
+  if (!lastDeletedRamen) return;
 
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
 
   ramenRef.get().then((doc) => {
     if (doc.exists) {
       let ramenList = doc.data().list;
-      ramenList.splice(index, 1);
+      ramenList.splice(lastDeletedRamen.index, 0, lastDeletedRamen.ramen);
 
-      ramenRef.set({ list: ramenList }).then(() => {
+      ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
         loadRamenList();
+        document.getElementById("undoBox").remove();
+        lastDeletedRamen = null;
       });
     }
   });
 }
+
 
 //ユーザー表示更新関数を追加
 function updateCurrentUserDisplay() {
