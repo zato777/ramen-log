@@ -13,6 +13,7 @@ const db = firebase.firestore();
 
 let currentUser = localStorage.getItem('currentUser') || null;
 let editIndex = -1;
+let allRamenList = []; // 全件保存用
 
 // ページ読み込み時にログイン状態を復元
 window.addEventListener('DOMContentLoaded', () => {
@@ -101,38 +102,92 @@ document.getElementById("ramenForm").addEventListener("submit", function(e) {
   }
 });
 
+document.getElementById("searchInput").addEventListener("input", function () {
+  const keyword = this.value.trim().toLowerCase();
+
+  const filtered = allRamenList.filter((r) => {
+    return (
+      r.shopName.toLowerCase().includes(keyword) ||
+      r.type.toLowerCase().includes(keyword) ||
+      r.memo.toLowerCase().includes(keyword)
+    );
+  });
+
+  // 検索後も現在のソート順で表示
+  const selected = document.getElementById("sortSelect").value;
+  if (selected === "date") {
+    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+  } else if (selected === "rating") {
+    filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  } else if (selected === "price") {
+    filtered.sort((a, b) => (b.price || 0) - (a.price || 0));
+  }
+
+  renderRamenList(filtered);
+});
+
+
 
 // ラーメンリストの読み込み
 function loadRamenList() {
-  const container = document.getElementById("ramenList");
-  container.innerHTML = "";
-
-  if (!currentUser) return;
-
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
-  ramenRef.get().then((doc) => {
-    if (doc.exists) {
-      const list = doc.data().list || [];
 
-      list.forEach((ramen, index) => {
-        container.innerHTML += `
-          <div class="card">
-            <h3>${ramen.shopName}</h3>
-            <p>日付: ${ramen.date}</p>
-            <p>種類: ${ramen.type}</p>
-            <p>評価: ${ramen.rating}</p>
-            <p>メモ: ${ramen.memo}</p>
-            ${ramen.photo ? `<img src="${ramen.photo}" alt="写真">` : ""}
-            <div style="margin-top: 10px;">
-              <button onclick="editRamen(${index})">編集</button>
-              <button onclick="deleteRamen(${index})">削除</button>
-            </div>
-          </div>
-        `;
-      });
+  ramenRef.get().then((doc) => {
+    const container = document.getElementById("ramenList");
+    container.innerHTML = "";
+
+    if (doc.exists) {
+      allRamenList = doc.data().list || [];
+
+      // 日付順でソート（降順）
+      allRamenList.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      renderRamenList(allRamenList);
     }
   });
 }
+
+document.getElementById("sortSelect").addEventListener("change", function () {
+  const selected = this.value;
+
+  let sorted = [...allRamenList];
+
+  if (selected === "date") {
+    sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
+  } else if (selected === "rating") {
+    sorted.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  } else if (selected === "price") {
+    sorted.sort((a, b) => (b.price || 0) - (a.price || 0));
+  }
+
+  renderRamenList(sorted);
+});
+
+
+function renderRamenList(list) {
+  const container = document.getElementById("ramenList");
+  container.innerHTML = "";
+
+  list.forEach((ramen, index) => {
+    container.innerHTML += `
+      <div class="card">
+        <h3>${ramen.shopName}</h3>
+        <p>日付: ${ramen.date}</p>
+        <p>種類: ${ramen.type}</p>
+        <p>値段: ${ramen.price ? ramen.price + "円" : "未記入"}</p>
+        <p>評価: ${ramen.rating}</p>
+        <p>メモ: ${ramen.memo}</p>
+        ${ramen.updatedAt ? `<p>更新日時: ${new Date(ramen.updatedAt.toDate()).toLocaleString()}</p>` : ""}
+        ${ramen.photo ? `<img src="${ramen.photo}" alt="写真">` : ""}
+        <div style="margin-top: 10px;">
+          <button onclick="editRamen(${index})">編集</button>
+          <button onclick="deleteRamen(${index})">削除</button>
+        </div>
+      </div>
+    `;
+  });
+}
+
 
 // 編集処理
 function editRamen(index) {
@@ -146,6 +201,7 @@ function editRamen(index) {
       document.getElementById("shopName").value = ramen.shopName;
       document.getElementById("date").value = ramen.date;
       document.getElementById("type").value = ramen.type;
+      document.getElementById("price").value = ramen.price || "";
       document.getElementById("rating").value = ramen.rating;
       document.getElementById("memo").value = ramen.memo;
 
@@ -274,6 +330,7 @@ function saveRamen(photoDataUrl) {
     shopName: document.getElementById("shopName").value,
     date: document.getElementById("date").value,
     type: document.getElementById("type").value,
+    price: document.getElementById("price").value,
     rating: document.getElementById("rating").value,
     memo: document.getElementById("memo").value,
     photo: photoDataUrl

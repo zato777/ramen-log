@@ -33,12 +33,18 @@
       <input type="text" id="shopName" placeholder="店名" required><br>
       <input type="date" id="date" required><br>
       <input type="text" id="type" placeholder="ラーメンの種類"><br>
+      <input type="number" id="price" placeholder="値段（円）"><br>
       <input type="number" id="rating" placeholder="評価（1〜5）" min="1" max="5"><br>
       <textarea id="memo" placeholder="メモ"></textarea><br>
       <input type="file" id="photo" accept="image/*">
       <button type="submit">記録する</button>
     </form>
-
+    <input type="text" id="searchInput" placeholder="検索（店名・種類・メモ）">
+    <select id="sortSelect">
+      <option value="date">日付順</option>
+      <option value="rating">評価順</option>
+      <option value="price">値段順</option>
+    </select>    
     <hr>
     <div id="ramenList"></div>
   </div>
