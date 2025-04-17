@@ -104,15 +104,17 @@ document.getElementById("ramenForm").addEventListener("submit", function(e) {
 
 // ラーメンリストの読み込み
 function loadRamenList() {
-  const container = document.getElementById("ramenList");
-  container.innerHTML = "";
-
-  if (!currentUser) return;
-
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
+
   ramenRef.get().then((doc) => {
+    const container = document.getElementById("ramenList");
+    container.innerHTML = "";
+
     if (doc.exists) {
       const list = doc.data().list || [];
+
+      // ✅ 日付順（新しい順）にソート
+      list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
       list.forEach((ramen, index) => {
         container.innerHTML += `
@@ -122,6 +124,7 @@ function loadRamenList() {
             <p>種類: ${ramen.type}</p>
             <p>評価: ${ramen.rating}</p>
             <p>メモ: ${ramen.memo}</p>
+            <p style="font-size: 0.8em; color: gray;">更新日時: ${ramen.updatedAt ? ramen.updatedAt.replace("T", " ").substring(0, 16) : "不明"}</p>
             ${ramen.photo ? `<img src="${ramen.photo}" alt="写真">` : ""}
             <div style="margin-top: 10px;">
               <button onclick="editRamen(${index})">編集</button>
@@ -133,6 +136,7 @@ function loadRamenList() {
     }
   });
 }
+
 
 // 編集処理
 function editRamen(index) {
@@ -221,7 +225,8 @@ function saveRamen(photoDataUrl) {
     type: document.getElementById("type").value,
     rating: document.getElementById("rating").value,
     memo: document.getElementById("memo").value,
-    photo: photoDataUrl
+    photo: photoDataUrl,
+    updatedAt: new Date().toISOString()  // ← 最終更新日時を追加
   };
 
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
