@@ -120,7 +120,7 @@ document.getElementById("searchInput").addEventListener("input", function () {
   } else if (selected === "rating") {
     filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
   } else if (selected === "price") {
-    filtered.sort((a, b) => (b.price || 0) - (a.price || 0));
+    filtered.sort((a, b) => calculateTotal(b.menuItems) - calculateTotal(a.menuItems));  
   }
 
   renderRamenList(filtered);
@@ -157,7 +157,7 @@ document.getElementById("sortSelect").addEventListener("change", function () {
   } else if (selected === "rating") {
     sorted.sort((a, b) => (b.rating || 0) - (a.rating || 0));
   } else if (selected === "price") {
-    sorted.sort((a, b) => (b.price || 0) - (a.price || 0));
+    sorted.sort((a, b) => calculateTotal(b.menuItems) - calculateTotal(a.menuItems));
   }
 
   renderRamenList(sorted);
@@ -169,17 +169,24 @@ function renderRamenList(list) {
   container.innerHTML = "";
 
   list.forEach((ramen, index) => {
+    const totalPrice = calculateTotal(ramen.menuItems);
     container.innerHTML += `
       <div class="card">
         <h3>${ramen.shopName}</h3>
         <p>日付: ${ramen.date}</p>
         <p>種類: ${ramen.type}</p>
-        <p>値段: ${ramen.price ? ramen.price + "円" : "未記入"}</p>
         <p>評価: ${ramen.rating}</p>
         <p>メモ: ${ramen.memo}</p>
+        ${ramen.menuItems && ramen.menuItems.length ? `
+          <ul>
+            ${ramen.menuItems.map(item => `<li>${item.name}：${item.price}円</li>`).join('')}
+          </ul>
+        ` : ''}
+        
         ${ramen.updatedAt ? `<p>更新日時: ${new Date(ramen.updatedAt.toDate()).toLocaleString()}</p>` : ""}
         ${ramen.photo ? `<img src="${ramen.photo}" alt="写真">` : ""}
         <div style="margin-top: 10px;">
+        <p><strong>合計金額:</strong> ${totalPrice}円</p>
           <button onclick="editRamen(${index})">編集</button>
           <button onclick="deleteRamen(${index})">削除</button>
         </div>
@@ -201,12 +208,19 @@ function editRamen(index) {
       document.getElementById("shopName").value = ramen.shopName;
       document.getElementById("date").value = ramen.date;
       document.getElementById("type").value = ramen.type;
-      document.getElementById("price").value = ramen.price || "";
       document.getElementById("rating").value = ramen.rating;
       document.getElementById("memo").value = ramen.memo;
 
       editIndex = index;
       document.querySelector("#ramenForm button").textContent = "更新する";
+
+      document.getElementById("menuList").innerHTML = '';
+if (ramen.menuItems && Array.isArray(ramen.menuItems)) {
+  ramen.menuItems.forEach(item => addMenuItem(item.name, item.price));
+  updateTotalPrice();
+  } else {
+  addMenuItem(); // メニューがなければ1つ空白追加
+}
 
       // スクロールトップ
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -326,14 +340,27 @@ function changeUsername() {
 }
 
 function saveRamen(photoDataUrl) {
+  const menuNames = document.querySelectorAll(".menu-name");
+  const menuPrices = document.querySelectorAll(".menu-price");
+  const menuItems = [];
+
+  for (let i = 0; i < menuNames.length; i++) {
+    const name = menuNames[i].value.trim();
+    const price = menuPrices[i].value;
+    if (name) {
+      menuItems.push({ name, price });
+    }
+  }
+
   const ramen = {
     shopName: document.getElementById("shopName").value,
     date: document.getElementById("date").value,
     type: document.getElementById("type").value,
-    price: document.getElementById("price").value,
-    rating: document.getElementById("rating").value,
+    rating: parseFloat(document.getElementById("rating").value),
     memo: document.getElementById("memo").value,
-    photo: photoDataUrl
+    photo: photoDataUrl,
+    menuItems: menuItems,
+    updatedAt: new Date()  // 更新日時を追加
   };
 
   const ramenRef = db.collection("ramenLogs").doc(currentUser);
@@ -352,9 +379,42 @@ function saveRamen(photoDataUrl) {
       ramenList.push(ramen);
     }
 
-    ramenRef.set({ list: ramenList }).then(() => {
+    ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
       loadRamenList();
       document.getElementById("ramenForm").reset();
+      document.getElementById("menuList").innerHTML = ''; // メニュー初期化
+      addMenuItem(); // 空欄1つ追加
+      updateTotalPrice();
     });
   });
+}
+
+
+function addMenuItem(name = '', price = '') {
+  const menuList = document.getElementById("menuList");
+
+  const div = document.createElement("div");
+  div.className = "menu-item";
+  div.innerHTML = `
+  <input type="text" class="menu-name" placeholder="メニュー名" value="${name}">
+  <input type="number" class="menu-price" placeholder="値段（円）" value="${price}" oninput="updateTotalPrice()">
+  <button type="button" onclick="this.parentNode.remove(); updateTotalPrice()">上記メニュー削除</button>
+`;
+  menuList.appendChild(div);
+}
+
+function updateTotalPrice() {
+  const prices = document.querySelectorAll(".menu-price");
+  let total = 0;
+  prices.forEach(input => {
+    const value = parseInt(input.value);
+    if (!isNaN(value)) {
+      total += value;
+    }
+  });
+  document.getElementById("totalPrice").textContent = total;
+}
+
+function calculateTotal(menuItems) {
+  return menuItems.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0);
 }
