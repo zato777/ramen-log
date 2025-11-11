@@ -8,7 +8,8 @@
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-</head>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+</head></head>
 <body>
   <h1>ラーメン記録アプリ</h1>
 
@@ -19,41 +20,47 @@
   </div>
 
   <div id="app" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
       <p><strong>現在のユーザー：</strong><span id="currentUserDisplay"></span></p>
       <div>
         <input type="text" id="newUsername" placeholder="新しいユーザー名">
         <button onclick="changeUsername()">ユーザー名変更</button>
       </div>
     </div>
+    
+    <div style="text-align: right; margin: 10px 0;">
+      <button onclick="logout()" style="background-color: #7f8c8d;">ログアウト</button>
+      <button onclick="deleteAccount()" style="background-color: #c0392b;">アカウントを削除</button>
+    </div>      
+
     <form id="ramenForm">
-      <div style="text-align: right;">
-        <!-- <button onclick="deleteAccount()">アカウントを削除</button> -->
-        <button onclick="logout()">ログアウト</button>
-      </div>      
       <input type="text" id="shopName" placeholder="店名" required><br>
       <input type="date" id="date" required><br>
       <input type="text" id="type" placeholder="ラーメンの種類"><br>
       <input type="number" id="rating" placeholder="評価（1〜5）" min="0" max="5" step="0.1"><br>
       <textarea id="memo" placeholder="メモ"></textarea><br>
+      
       <input type="file" id="photo" accept="image/*">
+      <div id="photoPreview" style="margin-top: 5px;"></div> 
+
       <div id="menuList">
-        <div class="menu-item">
-          <input type="text" class="menu-name" placeholder="メニュー名">
-          <input type="number" class="menu-price" placeholder="値段（円）">
         </div>
-      </div>
       <p>合計金額：<span id="totalPrice">0</span> 円</p>
       <button type="button" onclick="addMenuItem()">メニューを追加</button>
       
       <button type="submit">記録する</button>
     </form>
-    <input type="text" id="searchInput" placeholder="検索（店名・種類・メモ）">
-    <select id="sortSelect">
-      <option value="date">日付順</option>
-      <option value="rating">評価順</option>
-      <option value="price">値段順</option>
-    </select>    
+    
+    <div class="filters" style="display: flex; gap: 10px; margin: 20px 0;">
+      <input type="text" id="searchInput" placeholder="検索（店名・種類・メモ）" style="flex-grow: 1; margin: 0;">
+      <select id="sortSelect" style="width: auto; margin: 0;">
+        <option value="date">日付順</option>
+        <option value="rating">評価順</option>
+        <option value="price">値段順</option>
+      </select>
+      <button id="sortOrderToggle" onclick="toggleSortOrder()" style="width: auto; margin: 0;">降順</button>
+    </div>
+    
     <hr>
     <div id="ramenList"></div>
   </div>
