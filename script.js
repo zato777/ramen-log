@@ -1,31 +1,111 @@
+// Firebase 初期化
 const firebaseConfig = {
-  apiKey: "AIzaSyAvsjD4dsX9g-H9Hd7bAHUIYNAGLapMTj0",
-  authDomain: "ramen-log-b811d.firebaseapp.com",
-  projectId: "ramen-log-b811d",
-  storageBucket: "ramen-log-b811d.firebasestorage.app",
-  messagingSenderId: "715408643600",
-  appId: "1:715408643600:web:24adef805672ebf0169c95",
-  measurementId: "G-JHDWG2BPFJ"
-};
-
+    apiKey: "AIzaSyAvsjD4dsX9g-H9Hd7bAHUIYNAGLapMTj0",
+    authDomain: "ramen-log-b811d.firebaseapp.com",
+    projectId: "ramen-log-b811d",
+    storageBucket: "ramen-log-b811d.appspot.com", // Corrected for Storage
+    messagingSenderId: "715408643600",
+    appId: "1:715408643600:web:24adef805672ebf0169c95",
+    measurementId: "G-JHDWG2BPFJ"
+  };
+  
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const storage = firebase.storage(); // Firebase Storageの初期化
 
+// --- グローバル変数 ---
 let currentUser = localStorage.getItem('currentUser') || null;
-let editIndex = -1;
-let allRamenList = []; // 全件保存用
+let editData = { user: null, index: -1 }; // 編集対象のデータを保持
+let allRamenList = []; // 全員のラーメン記録
+let lastDeleted = null; // 最後に削除されたアイテム
 
-// ページ読み込み時にログイン状態を復元
+// --- イベントリスナー ---
+
+// ページ読み込み完了時
 window.addEventListener('DOMContentLoaded', () => {
   if (currentUser) {
     document.querySelector(".login").style.display = "none";
     document.getElementById("app").style.display = "block";
     loadRamenList();
   }
-  updateCurrentUserDisplay();  // ユーザー名表示を更新
+  updateCurrentUserDisplay();
 });
 
-// ログイン処理
+// フォーム送信時（記録・更新）
+document.getElementById("ramenForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); // デフォルトの送信をキャンセル
+
+  const shopName = document.getElementById("shopName").value;
+  if (!shopName) return alert("店名を入力してください");
+
+  const submitButton = document.querySelector("#ramenForm button[type='submit']");
+  submitButton.disabled = true;
+  submitButton.textContent = "送信中...";
+
+  try {
+    // メニューアイテムの取得
+    const menuItems = [];
+    document.querySelectorAll(".menu-item").forEach(item => {
+      const name = item.querySelector(".menu-name").value;
+      const price = item.querySelector(".menu-price").value;
+      if (name && price) {
+        menuItems.push({ name, price: parseInt(price) });
+      }
+    });
+
+    // 写真のアップロード処理
+    const photoFile = document.getElementById("photo").files[0];
+    let photoURL = editData.index !== -1 
+      ? (allRamenList.find(r => r.user === editData.user && r.index === editData.index)?.photo || "") 
+      : "";
+
+    if (photoFile) {
+      photoURL = await uploadPhoto(photoFile);
+    }
+    
+    const ramenData = {
+      shopName,
+      date: document.getElementById("date").value,
+      type: document.getElementById("type").value,
+      rating: document.getElementById("rating").value,
+      memo: document.getElementById("memo").value,
+      menuItems,
+      photo: photoURL,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp() // 更新日時
+    };
+
+    const userRef = db.collection("ramenLogs").doc(currentUser);
+    const doc = await userRef.get();
+    let ramenList = doc.exists ? doc.data().list : [];
+
+    if (editData.index === -1) { // 新規作成
+      ramenList.push(ramenData);
+    } else { // 更新
+      ramenList[editData.index] = ramenData;
+    }
+
+    await userRef.set({ list: ramenList }, { merge: true });
+
+    alert(editData.index === -1 ? "記録しました！" : "更新しました！");
+    resetForm();
+    loadRamenList();
+
+  } catch (error) {
+    console.error("Error saving ramen log:", error);
+    alert("エラーが発生しました。記録に失敗しました。");
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+// 検索入力時
+document.getElementById("searchInput").addEventListener("input", applyFiltersAndSort);
+// ソート順変更時
+document.getElementById("sortSelect").addEventListener("change", applyFiltersAndSort);
+
+
+// --- 認証関連の関数 ---
+
 function login() {
   const username = document.getElementById("username").value.trim();
   if (!username) return alert("ユーザー名を入力してください");
@@ -35,371 +115,229 @@ function login() {
 
   document.querySelector(".login").style.display = "none";
   document.getElementById("app").style.display = "block";
-
   loadRamenList();
-  updateCurrentUserDisplay();  // ユーザー名表示を更新
+  updateCurrentUserDisplay();
 }
 
-// ログアウト処理
 function logout() {
   currentUser = null;
   localStorage.removeItem('currentUser');
 
   document.getElementById("app").style.display = "none";
   document.querySelector(".login").style.display = "block";
-  document.getElementById("ramenList").innerHTML = "";
   document.getElementById("username").value = "";
-
-  updateCurrentUserDisplay();  // ユーザー名表示を更新
+  
+  resetForm();
+  updateCurrentUserDisplay();
 }
 
-// 登録処理
-// ファイル読み込み＆縮小してから保存
-document.getElementById("ramenForm").addEventListener("submit", function(e) {
-  e.preventDefault();
+function updateCurrentUserDisplay() {
+  document.getElementById("currentUserDisplay").textContent = currentUser || "未ログイン";
+}
 
-  const file = document.getElementById("photo").files[0];
+// --- データ操作関連の関数 ---
 
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = function(event) {
-      const img = new Image();
-      img.onload = function() {
-        const canvas = document.createElement("canvas");
-
-        const maxSize = 800;  // 最大幅または高さ（必要に応じて調整）
-        let width = img.width;
-        let height = img.height;
-
-        // サイズを調整（比率を保ったまま）
-        if (width > height) {
-          if (width > maxSize) {
-            height *= maxSize / width;
-            width = maxSize;
-          }
-        } else {
-          if (height > maxSize) {
-            width *= maxSize / height;
-            height = maxSize;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const base64 = canvas.toDataURL("image/jpeg", 0.7);  // 画質調整（0.0〜1.0）
-
-        saveRamen(base64);  // 画像付きで保存
-      };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-  } else {
-    saveRamen(null);  // 画像なしで保存
-  }
-});
-
-document.getElementById("searchInput").addEventListener("input", function () {
-  const keyword = this.value.trim().toLowerCase();
-
-  const filtered = allRamenList.filter((r) => {
-    return (
-      r.shopName.toLowerCase().includes(keyword) ||
-      r.type.toLowerCase().includes(keyword) ||
-      r.memo.toLowerCase().includes(keyword)
-    );
-  });
-
-  // 検索後も現在のソート順で表示
-  const selected = document.getElementById("sortSelect").value;
-  if (selected === "date") {
-    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
-  } else if (selected === "rating") {
-    filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  } else if (selected === "price") {
-    filtered.sort((a, b) => calculateTotal(b.menuItems) - calculateTotal(a.menuItems));  
-  }
-
-  renderRamenList(filtered);
-});
-
-
-
-// ラーメンリストの読み込み
 function loadRamenList() {
-  const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-  ramenRef.get().then((doc) => {
-    const container = document.getElementById("ramenList");
-    container.innerHTML = "";
-
-    if (doc.exists) {
-      allRamenList = doc.data().list || [];
-
-      // 日付順でソート（降順）
-      allRamenList.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      renderRamenList(allRamenList);
-    }
+  db.collection("ramenLogs").get().then((querySnapshot) => {
+    allRamenList = [];
+    querySnapshot.forEach((doc) => {
+      const user = doc.id;
+      const list = doc.data().list || [];
+      list.forEach((ramen, index) => {
+        allRamenList.push({ ...ramen, user, index }); // 元のindexとuserをデータに含める
+      });
+    });
+    applyFiltersAndSort();
   });
 }
-
-document.getElementById("sortSelect").addEventListener("change", function () {
-  const selected = this.value;
-
-  let sorted = [...allRamenList];
-
-  if (selected === "date") {
-    sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
-  } else if (selected === "rating") {
-    sorted.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  } else if (selected === "price") {
-    sorted.sort((a, b) => calculateTotal(b.menuItems) - calculateTotal(a.menuItems));
-  }
-
-  renderRamenList(sorted);
-});
-
 
 function renderRamenList(list) {
   const container = document.getElementById("ramenList");
   container.innerHTML = "";
-
-  list.forEach((ramen, index) => {
+  if (list.length === 0) {
+    container.innerHTML = "<p>記録はまだありません。</p>";
+    return;
+  }
+  list.forEach((ramen) => {
     const totalPrice = calculateTotal(ramen.menuItems);
+    const isOwner = (ramen.user === currentUser);
+    const updatedAt = ramen.updatedAt ? new Date(ramen.updatedAt.toDate()).toLocaleString('ja-JP') : "N/A";
+
     container.innerHTML += `
       <div class="card">
         <h3>${ramen.shopName}</h3>
-        <p>日付: ${ramen.date}</p>
-        <p>種類: ${ramen.type}</p>
-        <p>評価: ${ramen.rating}</p>
-        <p>メモ: ${ramen.memo}</p>
-        ${ramen.menuItems && ramen.menuItems.length ? `
-          <ul>
-            ${ramen.menuItems.map(item => `<li>${item.name}：${item.price}円</li>`).join('')}
-          </ul>
-        ` : ''}
-        
-        ${ramen.updatedAt ? `<p>更新日時: ${new Date(ramen.updatedAt.toDate()).toLocaleString()}</p>` : ""}
-        ${ramen.photo ? `<img src="${ramen.photo}" alt="写真">` : ""}
-        <div style="margin-top: 10px;">
-        <p><strong>合計金額:</strong> ${totalPrice}円</p>
-          <button onclick="editRamen(${index})">編集</button>
-          <button onclick="deleteRamen(${index})">削除</button>
+        <p><strong>記録者:</strong> ${ramen.user}</p>
+        <p><strong>日付:</strong> ${ramen.date}</p>
+        <p><strong>種類:</strong> ${ramen.type || '未入力'}</p>
+        <p><strong>評価:</strong> ${'★'.repeat(ramen.rating)}${'☆'.repeat(5 - ramen.rating)} (${ramen.rating || 'N/A'})</p>
+        <p><strong>メモ:</strong> ${ramen.memo || 'なし'}</p>
+        ${ramen.menuItems && ramen.menuItems.length > 0 ? `<strong>メニュー:</strong><ul>${ramen.menuItems.map(item => `<li>${item.name}：${item.price}円</li>`).join('')}</ul>` : ''}
+        ${ramen.photo ? `<img src="${ramen.photo}" alt="${ramen.shopName}の写真" style="cursor:pointer;" onclick="window.open('${ramen.photo}', '_blank')">` : ""}
+        <p class="timestamp">更新日時: ${updatedAt}</p>
+        <div class="card-footer">
+          <p><strong>合計金額:</strong> ${totalPrice}円</p>
+          <div class="card-actions">
+          ${isOwner ? `
+            <button onclick="editRamen('${ramen.user}', ${ramen.index})">編集</button>
+            <button onclick="deleteRamen('${ramen.user}', ${ramen.index})">削除</button>
+          ` : ""}
+          </div>
         </div>
       </div>
     `;
   });
 }
 
+function applyFiltersAndSort() {
+  let filteredList = [...allRamenList];
+  const searchTerm = document.getElementById("searchInput").value.toLowerCase();
+  const sortValue = document.getElementById("sortSelect").value;
 
-// 編集処理
-function editRamen(index) {
-  const ramenRef = db.collection("ramenLogs").doc(currentUser);
+  // フィルター
+  if (searchTerm) {
+    filteredList = filteredList.filter(r => 
+      r.shopName.toLowerCase().includes(searchTerm) ||
+      (r.type && r.type.toLowerCase().includes(searchTerm)) ||
+      (r.memo && r.memo.toLowerCase().includes(searchTerm))
+    );
+  }
 
-  ramenRef.get().then((doc) => {
-    if (doc.exists) {
-      const ramenList = doc.data().list;
-      const ramen = ramenList[index];
+  // ソート
+  switch (sortValue) {
+    case "date":
+      filteredList.sort((a, b) => new Date(b.date) - new Date(a.date));
+      break;
+    case "rating":
+      filteredList.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      break;
+    case "price":
+      filteredList.sort((a, b) => calculateTotal(b.menuItems) - calculateTotal(a.menuItems));
+      break;
+  }
+  
+  renderRamenList(filteredList);
+}
 
-      document.getElementById("shopName").value = ramen.shopName;
-      document.getElementById("date").value = ramen.date;
-      document.getElementById("type").value = ramen.type;
-      document.getElementById("rating").value = ramen.rating;
-      document.getElementById("memo").value = ramen.memo;
 
-      editIndex = index;
-      document.querySelector("#ramenForm button").textContent = "更新する";
+// --- CRUD操作 ---
 
-      document.getElementById("menuList").innerHTML = '';
-if (ramen.menuItems && Array.isArray(ramen.menuItems)) {
-  ramen.menuItems.forEach(item => addMenuItem(item.name, item.price));
-  updateTotalPrice();
+function editRamen(user, index) {
+  if (user !== currentUser) return; // 自分の記録以外は編集不可
+
+  const ramen = allRamenList.find(r => r.user === user && r.index === index);
+  if (!ramen) return;
+
+  document.getElementById("shopName").value = ramen.shopName;
+  document.getElementById("date").value = ramen.date;
+  document.getElementById("type").value = ramen.type;
+  document.getElementById("rating").value = ramen.rating;
+  document.getElementById("memo").value = ramen.memo;
+
+  const menuList = document.getElementById("menuList");
+  menuList.innerHTML = '';
+  if (ramen.menuItems && ramen.menuItems.length > 0) {
+    ramen.menuItems.forEach(item => addMenuItem(item.name, item.price));
   } else {
-  addMenuItem(); // メニューがなければ1つ空白追加
+    addMenuItem(); //メニューがなければ空の項目を追加
+  }
+  
+  updateTotalPrice();
+
+  editData = { user, index }; // 編集対象としてセット
+  document.querySelector("#ramenForm button[type='submit']").textContent = "更新する";
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-      // スクロールトップ
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  });
-}
+async function deleteRamen(user, index) {
+  if (user !== currentUser) return; // 自分の記録以外は削除不可
+  
+  const ramenRef = db.collection("ramenLogs").doc(user);
+  const doc = await ramenRef.get();
 
+  if (doc.exists) {
+    const ramenList = doc.data().list;
+    const deletedItem = { ...ramenList[index], user, originalIndex: index };
 
-// 削除処理
-let lastDeletedRamen = null; // グローバルに保持
-
-function deleteRamen(index) {
-  const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-  ramenRef.get().then((doc) => {
-    if (doc.exists) {
-      let ramenList = doc.data().list;
-      const deleted = ramenList[index];
-
-      if (!confirm(`「${deleted.shopName}」を削除しますか？`)) return;
-
-      lastDeletedRamen = { ramen: deleted, index: index }; // 復元用に保存
+    if (confirm(`「${deletedItem.shopName}」の記録を削除しますか？`)) {
+      lastDeleted = deletedItem; // 削除取り消し用に保存
       ramenList.splice(index, 1);
-
-      ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
-        loadRamenList();
-        showUndo(); // 復元通知
-      });
+      await ramenRef.set({ list: ramenList });
+      loadRamenList();
+      showUndo();
     }
-  });
+  }
 }
 
 function showUndo() {
-  const undoBox = document.createElement("div");
-  undoBox.id = "undoBox";
-  undoBox.style.position = "fixed";
-  undoBox.style.bottom = "20px";
-  undoBox.style.left = "50%";
-  undoBox.style.transform = "translateX(-50%)";
-  undoBox.style.backgroundColor = "#eee";
-  undoBox.style.border = "1px solid #ccc";
-  undoBox.style.padding = "10px 20px";
-  undoBox.style.borderRadius = "10px";
-  undoBox.style.boxShadow = "0 2px 5px rgba(0,0,0,0.2)";
-  undoBox.innerHTML = `削除を取り消す <button onclick="undoDelete()">復元</button>`;
+    let undoBox = document.getElementById("undoBox");
+    if(undoBox) undoBox.remove();
 
-  document.body.appendChild(undoBox);
+    undoBox = document.createElement("div");
+    undoBox.id = "undoBox";
+    undoBox.innerHTML = `削除を取り消す <button onclick="undoDelete()">復元</button>`;
+    document.body.appendChild(undoBox);
 
-  // 自動で5秒後に消える
-  setTimeout(() => {
-    if (document.getElementById("undoBox")) {
-      document.body.removeChild(undoBox);
-      lastDeletedRamen = null;
-    }
-  }, 5000);
-}
-
-function undoDelete() {
-  if (!lastDeletedRamen) return;
-
-  const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-  ramenRef.get().then((doc) => {
-    if (doc.exists) {
-      let ramenList = doc.data().list;
-      ramenList.splice(lastDeletedRamen.index, 0, lastDeletedRamen.ramen);
-
-      ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
-        loadRamenList();
-        document.getElementById("undoBox").remove();
-        lastDeletedRamen = null;
-      });
-    }
-  });
-}
-
-
-//ユーザー表示更新関数を追加
-function updateCurrentUserDisplay() {
-  document.getElementById("currentUserDisplay").textContent = currentUser || "";
-}
-
-function changeUsername() {
-  const newUsername = document.getElementById("newUsername").value.trim();
-  if (!newUsername) return alert("新しいユーザー名を入力してください");
-  if (newUsername === currentUser) return alert("同じ名前です");
-
-  const oldRef = db.collection("ramenLogs").doc(currentUser);
-  const newRef = db.collection("ramenLogs").doc(newUsername);
-
-  // まず、新しいユーザー名がすでに使われていないか確認
-  newRef.get().then((newDoc) => {
-    if (newDoc.exists) {
-      alert("そのユーザー名はすでに使われています");
-      return;
-    }
-
-    // 新しい名前が空いている → データ移行開始
-    oldRef.get().then(doc => {
-      if (doc.exists) {
-        const data = doc.data();
-        newRef.set(data).then(() => {
-          oldRef.delete().then(() => {
-            currentUser = newUsername;
-            localStorage.setItem("currentUser", currentUser);
-            updateCurrentUserDisplay();
-            document.getElementById("newUsername").value = "";
-            loadRamenList();
-            alert("ユーザー名を変更しました");
-          });
-        });
-      } else {
-        alert("元のデータが見つかりませんでした");
+    setTimeout(() => {
+      if (document.getElementById("undoBox")) {
+        document.body.removeChild(undoBox);
       }
-    });
-  });
+    }, 5000);
 }
 
-function saveRamen(photoDataUrl) {
-  const menuNames = document.querySelectorAll(".menu-name");
-  const menuPrices = document.querySelectorAll(".menu-price");
-  const menuItems = [];
+async function undoDelete() {
+    if (!lastDeleted) return;
 
-  for (let i = 0; i < menuNames.length; i++) {
-    const name = menuNames[i].value.trim();
-    const price = menuPrices[i].value;
-    if (name) {
-      menuItems.push({ name, price });
+    const userRef = db.collection("ramenLogs").doc(lastDeleted.user);
+    const doc = await userRef.get();
+    const ramenList = doc.exists ? doc.data().list : [];
+    
+    // 元の位置に復元
+    ramenList.splice(lastDeleted.originalIndex, 0, lastDeleted);
+
+    await userRef.set({ list: ramenList });
+    
+    alert("復元しました。");
+    loadRamenList();
+    lastDeleted = null;
+
+    let undoBox = document.getElementById("undoBox");
+    if(undoBox) undoBox.remove();
+}
+
+async function deleteAccount() {
+  if (!currentUser) return;
+  if (confirm("本当にこのアカウントと全ての記録を削除しますか？\nこの操作は取り消せません。")) {
+    try {
+      await db.collection("ramenLogs").doc(currentUser).delete();
+      alert("アカウントを削除しました。");
+      logout();
+    } catch (error) {
+      console.error("アカウント削除エラー:", error);
+      alert("アカウントの削除に失敗しました。");
     }
   }
-
-  const ramen = {
-    shopName: document.getElementById("shopName").value,
-    date: document.getElementById("date").value,
-    type: document.getElementById("type").value,
-    rating: parseFloat(document.getElementById("rating").value),
-    memo: document.getElementById("memo").value,
-    photo: photoDataUrl,
-    menuItems: menuItems,
-    updatedAt: new Date()  // 更新日時を追加
-  };
-
-  const ramenRef = db.collection("ramenLogs").doc(currentUser);
-
-  ramenRef.get().then((doc) => {
-    let ramenList = doc.exists ? doc.data().list : [];
-
-    if (editIndex >= 0) {
-      if (!ramen.photo) {
-        ramen.photo = ramenList[editIndex].photo;
-      }
-      ramenList[editIndex] = ramen;
-      editIndex = -1;
-      document.querySelector("#ramenForm button").textContent = "記録する";
-    } else {
-      ramenList.push(ramen);
-    }
-
-    ramenRef.set({ list: ramenList, updatedAt: new Date() }).then(() => {
-      loadRamenList();
-      document.getElementById("ramenForm").reset();
-      document.getElementById("menuList").innerHTML = ''; // メニュー初期化
-      addMenuItem(); // 空欄1つ追加
-      updateTotalPrice();
-    });
-  });
 }
 
+// --- ヘルパー関数 ---
+
+function resetForm() {
+  document.getElementById("ramenForm").reset();
+  document.getElementById("menuList").innerHTML = '';
+  addMenuItem(); // 空のメニュー項目を1つ追加
+  updateTotalPrice();
+  document.querySelector("#ramenForm button[type='submit']").textContent = "記録する";
+  editData = { user: null, index: -1 }; // 編集モードを解除
+}
 
 function addMenuItem(name = '', price = '') {
   const menuList = document.getElementById("menuList");
-
   const div = document.createElement("div");
   div.className = "menu-item";
   div.innerHTML = `
-  <input type="text" class="menu-name" placeholder="メニュー名" value="${name}">
-  <input type="number" class="menu-price" placeholder="値段（円）" value="${price}" oninput="updateTotalPrice()">
-  <button type="button" onclick="this.parentNode.remove(); updateTotalPrice()">上記メニュー削除</button>
-`;
+    <input type="text" class="menu-name" placeholder="メニュー名" value="${name}">
+    <input type="number" class="menu-price" placeholder="値段（円）" value="${price}" oninput="updateTotalPrice()">
+    <button type="button" class="remove-btn" onclick="this.parentNode.remove(); updateTotalPrice()">×</button>
+  `;
   menuList.appendChild(div);
 }
 
@@ -407,14 +345,25 @@ function updateTotalPrice() {
   const prices = document.querySelectorAll(".menu-price");
   let total = 0;
   prices.forEach(input => {
-    const value = parseInt(input.value);
-    if (!isNaN(value)) {
-      total += value;
-    }
+    total += Number(input.value) || 0;
   });
   document.getElementById("totalPrice").textContent = total;
 }
 
 function calculateTotal(menuItems) {
-  return menuItems.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0);
+  if (!menuItems) return 0;
+  return menuItems.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
 }
+
+// Firebase Storageへ写真をアップロードする関数
+async function uploadPhoto(file) {
+  if (!currentUser) throw new Error("User not logged in");
+  const filePath = `ramen_photos/${currentUser}/${Date.now()}_${file.name}`;
+  const fileRef = storage.ref(filePath);
+  await fileRef.put(file);
+  const url = await fileRef.getDownloadURL();
+  return url;
+}
+
+// ページ読み込み時に最初のメニュー項目を追加
+addMenuItem();
