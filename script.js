@@ -454,11 +454,38 @@ function calculateTotal(menuItems) {
 
 async function uploadPhoto(file) {
   if (!currentUser) throw new Error("User not logged in");
+  const uploadFile = await compressPhoto(file);
   const filePath = `ramen_photos/${currentUser}/${Date.now()}_${file.name}`;
   const fileRef = storage.ref(filePath);
-  await fileRef.put(file);
+  await fileRef.put(uploadFile);
   const url = await fileRef.getDownloadURL();
   return url;
+}
+
+async function compressPhoto(file) {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return file;
+
+  const imageURL = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = imageURL;
+    await image.decode();
+
+    const maxDimension = 1600;
+    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob || blob.size >= file.size) return file;
+
+    const filename = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], filename, { type: "image/jpeg" });
+  } finally {
+    URL.revokeObjectURL(imageURL);
+  }
 }
 
 function escapeHTML(str) {
