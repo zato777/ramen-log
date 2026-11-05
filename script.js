@@ -69,6 +69,9 @@ window.addEventListener('DOMContentLoaded', () => {
     event.preventDefault();
     login();
   });
+  document.getElementById("personalTab").addEventListener("click", () => switchAppView("personal"));
+  document.getElementById("timelineTab").addEventListener("click", () => switchAppView("timeline"));
+  document.getElementById("refreshTimeline").addEventListener("click", loadTimeline);
   document.querySelectorAll(".password-reveal").forEach(button => {
     const passwordInput = document.getElementById(button.dataset.passwordTarget);
     const setVisibility = visible => {
@@ -203,12 +206,28 @@ async function deleteAccount() {
   try {
     const credential = firebase.auth.EmailAuthProvider.credential(authUser.email, password);
     await authUser.reauthenticateWithCredential(credential);
+    await deletePublicPostsForUser(currentUser);
     await db.collection("ramenLogs").doc(currentUser).delete();
     await authUser.delete();
     alert("アカウントを削除しました。");
   } catch (error) {
     console.error("アカウント削除エラー:", error);
     alert("アカウントの削除に失敗しました。パスワードや通信状態を確認してください。");
+  }
+}
+
+async function deletePublicPostsForUser(ownerUid) {
+  while (true) {
+    const snapshot = await db.collection("publicRamenPosts")
+      .where("ownerUid", "==", ownerUid)
+      .limit(400)
+      .get();
+    if (snapshot.empty) return;
+
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    if (snapshot.size < 400) return;
   }
 }
 
@@ -302,6 +321,86 @@ function renderRamenList(list) {
   });
 }
 
+function switchAppView(view) {
+  const isTimeline = view === "timeline";
+  document.getElementById("personalView").hidden = isTimeline;
+  document.getElementById("timelineView").hidden = !isTimeline;
+  document.getElementById("personalTab").setAttribute("aria-selected", String(!isTimeline));
+  document.getElementById("timelineTab").setAttribute("aria-selected", String(isTimeline));
+  if (isTimeline) loadTimeline();
+}
+
+async function loadTimeline() {
+  const status = document.getElementById("timelineStatus");
+  status.textContent = "読み込み中...";
+  try {
+    const snapshot = await db.collection("publicRamenPosts")
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
+    renderTimeline(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    status.textContent = snapshot.empty ? "公開投稿はまだありません。" : `最新${snapshot.size}件を表示中`;
+  } catch (error) {
+    console.error("タイムライン読み込みエラー:", error);
+    status.textContent = "タイムラインを読み込めませんでした。接続またはFirestoreルールを確認してください。";
+    document.getElementById("timelineList").innerHTML = "";
+  }
+}
+
+function renderTimeline(posts) {
+  const container = document.getElementById("timelineList");
+  if (posts.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = posts.map(post => {
+    const ratingValue = Number(post.rating);
+    const rating = Math.min(5, Math.max(0, Math.round(ratingValue) || 0));
+    const ratingLabel = Number.isFinite(ratingValue) && ratingValue > 0 ? ratingValue : "未評価";
+    const menuItems = Array.isArray(post.menuItems) ? post.menuItems : [];
+    const menuHTML = menuItems.length
+      ? `<strong>メニュー:</strong><ul>${menuItems.map(item => `<li>${escapeHTML(item.name)}：${Number(item.price) || 0}円</li>`).join("")}</ul>`
+      : "";
+    const photo = typeof post.photo === "string" && (post.photo.startsWith("data:image/") || post.photo.startsWith("https://"))
+      ? `<a href="${escapeHTML(post.photo)}" target="_blank" rel="noopener" title="画像を新しいタブで開く"><img src="${escapeHTML(post.photo)}" alt="${escapeHTML(post.shopName)}の写真" style="max-width: 100%; max-height: 240px; object-fit: cover; border-radius: 8px; margin-top: 10px;"></a>`
+      : "";
+    const createdAt = post.createdAt && typeof post.createdAt.toDate === "function"
+      ? post.createdAt.toDate().toLocaleString("ja-JP")
+      : "";
+
+    return `<article class="card timeline-card">
+      <div class="timeline-author">${escapeHTML(post.authorName || "ユーザー")}</div>
+      <h3>${escapeHTML(post.shopName)}</h3>
+      <p><strong>日付:</strong> ${escapeHTML(post.date)}</p>
+      <p><strong>種類:</strong> ${escapeHTML(post.type) || "未入力"}</p>
+      <p><strong>評価:</strong> ${"★".repeat(rating)}${"☆".repeat(5 - rating)} (${ratingLabel})</p>
+      <p><strong>メモ:</strong> ${escapeHTML(post.memo) || "なし"}</p>
+      ${menuHTML}
+      ${photo}
+      <p class="timestamp">投稿日: ${escapeHTML(createdAt)}</p>
+    </article>`;
+  }).join("");
+}
+
+function createPublicPost(ramen) {
+  const authorName = currentDisplayName && !currentDisplayName.includes("@")
+    ? currentDisplayName
+    : "ラーメン好き";
+  return {
+    ownerUid: currentUser,
+    authorName,
+    shopName: ramen.shopName,
+    date: ramen.date,
+    type: ramen.type,
+    rating: ramen.rating,
+    memo: ramen.memo,
+    menuItems: ramen.menuItems,
+    photo: ramen.photo,
+    createdAt: ramen.updatedAt || firebase.firestore.FieldValue.serverTimestamp()
+  };
+}
+
 // --- フォーム送信 (★修正点③：写真の保持) ---
 // 【差し替え】この関数を丸ごと置き換えてください
 async function handleFormSubmit(e) {
@@ -352,6 +451,12 @@ async function handleFormSubmit(e) {
     if (photoFile) {
       photoURL = await photoToDataURL(photoFile);
     }
+
+    const existingRamen = editIndex !== -1 ? userRamenList[editIndex] : null;
+    const shareToTimeline = document.getElementById("shareToTimeline").checked;
+    const publicPostId = shareToTimeline
+      ? (existingRamen && existingRamen.publicPostId) || db.collection("publicRamenPosts").doc().id
+      : "";
     
     const ramenData = {
       shopName,
@@ -361,6 +466,7 @@ async function handleFormSubmit(e) {
       memo: document.getElementById("memo").value,
       menuItems,
       photo: photoURL,
+      publicPostId,
       // ★★★ ここが修正点です ★★★
       // serverTimestamp() の代わりに、クライアントの現在時刻 new Date() を使います
       updatedAt: new Date() 
@@ -379,12 +485,22 @@ async function handleFormSubmit(e) {
     }
 
     const userRef = db.collection("ramenLogs").doc(currentUser);
-    await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: nextRamenList });
+    const batch = db.batch();
+    batch.set(userRef, { ownerUid: currentUser, username: currentDisplayName, list: nextRamenList });
+    if (shareToTimeline) {
+      const postRef = db.collection("publicRamenPosts").doc(publicPostId);
+      batch.set(postRef, createPublicPost(ramenData));
+    } else if (existingRamen && existingRamen.publicPostId) {
+      const postRef = db.collection("publicRamenPosts").doc(existingRamen.publicPostId);
+      batch.delete(postRef);
+    }
+    await batch.commit();
     userRamenList = nextRamenList;
 
     alert(editIndex === -1 ? "記録しました！" : "更新しました！");
     resetForm();
     applyFiltersAndSort();
+    if (document.getElementById("timelineView").hidden === false) loadTimeline();
 
   } catch (error) {
     console.error("Error saving ramen log:", error);
@@ -471,6 +587,7 @@ function editRamen(index) {
   } else {
     preview.innerHTML = "";
   }
+  document.getElementById("shareToTimeline").checked = Boolean(ramen.publicPostId);
   document.getElementById("photo").value = "";
 
   editIndex = index; // 編集対象としてインデックスをセット
@@ -483,15 +600,28 @@ async function deleteRamen(index) {
   if (!deletedItem) return;
 
   if (confirm(`「${deletedItem.shopName}」の記録を削除しますか？`)) {
-    lastDeleted = { ...deletedItem, originalIndex: index }; // 削除取り消し用に保存
-    userRamenList.splice(index, 1); // グローバル変数から削除
-
-    // DBに反映
-    const userRef = db.collection("ramenLogs").doc(currentUser);
-    await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: userRamenList });
-    
-    applyFiltersAndSort(); // 再描画
-    showUndo();
+    const nextRamenList = [...userRamenList];
+    nextRamenList.splice(index, 1);
+    try {
+      const batch = db.batch();
+      batch.set(db.collection("ramenLogs").doc(currentUser), {
+        ownerUid: currentUser,
+        username: currentDisplayName,
+        list: nextRamenList
+      });
+      if (deletedItem.publicPostId) {
+        batch.delete(db.collection("publicRamenPosts").doc(deletedItem.publicPostId));
+      }
+      await batch.commit();
+      lastDeleted = { ...deletedItem, originalIndex: index };
+      userRamenList = nextRamenList;
+      applyFiltersAndSort();
+      if (!document.getElementById("timelineView").hidden) loadTimeline();
+      showUndo();
+    } catch (error) {
+      console.error("記録削除エラー:", error);
+      alert("記録を削除できませんでした。");
+    }
   }
 }
 
@@ -525,16 +655,31 @@ function showUndo() {
 async function undoDelete() {
   if (!lastDeleted) return;
 
-  // 元の位置に復元
-  userRamenList.splice(lastDeleted.originalIndex, 0, lastDeleted);
-  
-  // DBに反映
-  const userRef = db.collection("ramenLogs").doc(currentUser);
-  await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: userRamenList });
-
-  alert("復元しました。");
-  applyFiltersAndSort(); // 再描画
-  lastDeleted = null;
+  const nextRamenList = [...userRamenList];
+  nextRamenList.splice(lastDeleted.originalIndex, 0, lastDeleted);
+  try {
+    const batch = db.batch();
+    batch.set(db.collection("ramenLogs").doc(currentUser), {
+      ownerUid: currentUser,
+      username: currentDisplayName,
+      list: nextRamenList
+    });
+    if (lastDeleted.publicPostId) {
+      batch.set(
+        db.collection("publicRamenPosts").doc(lastDeleted.publicPostId),
+        createPublicPost(lastDeleted)
+      );
+    }
+    await batch.commit();
+    userRamenList = nextRamenList;
+    alert("復元しました。");
+    applyFiltersAndSort();
+    if (!document.getElementById("timelineView").hidden) loadTimeline();
+    lastDeleted = null;
+  } catch (error) {
+    console.error("記録復元エラー:", error);
+    alert("記録を復元できませんでした。");
+  }
 
   let undoBox = document.getElementById("undoBox");
   if(undoBox) undoBox.remove();

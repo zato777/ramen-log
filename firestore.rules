@@ -31,5 +31,34 @@ service cloud.firestore {
 
       allow delete: if ownsExistingDocument();
     }
+
+    match /publicRamenPosts/{postId} {
+      function isVerifiedUser() {
+        return request.auth != null
+          && request.auth.token.email_verified == true;
+      }
+
+      function hasPublicPostFields() {
+        return request.resource.data.keys().hasAll([
+            'ownerUid', 'authorName', 'shopName', 'date', 'type',
+            'rating', 'memo', 'menuItems', 'photo', 'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'ownerUid', 'authorName', 'shopName', 'date', 'type',
+            'rating', 'memo', 'menuItems', 'photo', 'createdAt'
+          ]);
+      }
+
+      allow get, list: if isVerifiedUser();
+      allow create: if isVerifiedUser()
+        && request.resource.data.ownerUid == request.auth.uid
+        && hasPublicPostFields();
+      allow update: if isVerifiedUser()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+        && hasPublicPostFields();
+      allow delete: if isVerifiedUser()
+        && resource.data.ownerUid == request.auth.uid;
+    }
   }
 }

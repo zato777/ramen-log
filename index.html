@@ -47,6 +47,12 @@
       <button onclick="deleteAccount()" style="background-color: #c0392b;">アカウントを削除</button>
     </div>      
 
+    <div class="view-tabs" role="tablist" aria-label="表示する記録">
+      <button type="button" id="personalTab" role="tab" aria-selected="true">自分の記録</button>
+      <button type="button" id="timelineTab" role="tab" aria-selected="false">タイムライン</button>
+    </div>
+
+    <div id="personalView" role="tabpanel" aria-labelledby="personalTab">
     <form id="ramenForm">
       <input type="text" id="shopName" placeholder="店名" required><br>
       <input type="date" id="date" required><br>
@@ -56,6 +62,10 @@
       
       <input type="file" id="photo" accept="image/*">
       <div id="photoPreview" style="margin-top: 5px;"></div> 
+      <label class="public-toggle">
+        <input type="checkbox" id="shareToTimeline">
+        <span><strong>タイムラインに公開</strong><small>店名、種類、評価、メモ、メニュー、写真が他の利用者に公開されます。</small></span>
+      </label>
 
       <div id="menuList">
         </div>
@@ -77,6 +87,16 @@
     
     <hr>
     <div id="ramenList"></div>
+    </div>
+
+    <section id="timelineView" role="tabpanel" aria-labelledby="timelineTab" hidden>
+      <div class="timeline-heading">
+        <h2>公開タイムライン</h2>
+        <button type="button" id="refreshTimeline" aria-label="タイムラインを更新" title="更新">更新</button>
+      </div>
+      <p id="timelineStatus" role="status" aria-live="polite"></p>
+      <div id="timelineList"></div>
+    </section>
   </div>
 
   <script src="script.js"></script>
