@@ -1,0 +1,4 @@
+**/node_modules/
+admin-migration/.env
+admin-migration/*service-account*.json
+admin-migration/*private-key*.json

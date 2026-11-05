@@ -36,6 +36,25 @@ form input:focus, form textarea:focus {
   outline: none;
 }
 
+.password-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.password-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.password-field .password-reveal {
+  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin: 8px 0;
+  padding: 12px;
+}
+
 /* --- ボタン --- */
 button {
   background-color: #e67e22;

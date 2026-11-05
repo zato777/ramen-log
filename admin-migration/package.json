@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "migrate": "node migrate-legacy-ramen-logs.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

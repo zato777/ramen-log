@@ -7,16 +7,30 @@
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
 </head></head>
 <body>
   <h1>ラーメン記録アプリ</h1>
 
   <div class="login">
-    <input type="text" id="username" placeholder="ユーザー名を入力">
-    <button onclick="login()">ログイン</button>
-    <p class="note">※ ユーザー名を入力すると記録が読み込まれます</p>
+    <form id="authForm">
+      <input type="email" id="email" placeholder="メールアドレス" autocomplete="email" required>
+      <div class="password-field">
+        <input type="password" id="password" placeholder="パスワード" autocomplete="current-password" required>
+        <button type="button" class="password-reveal" data-password-target="password" aria-label="押している間だけパスワードを表示" aria-pressed="false">押して表示</button>
+      </div>
+      <div class="password-field">
+        <input type="password" id="passwordConfirm" placeholder="パスワード（新規登録時の確認用）" autocomplete="new-password">
+        <button type="button" class="password-reveal" data-password-target="passwordConfirm" aria-label="押している間だけ確認用パスワードを表示" aria-pressed="false">押して表示</button>
+      </div>
+      <input type="text" id="displayName" placeholder="表示名（新規登録時）" autocomplete="nickname">
+      <button type="submit">ログイン</button>
+      <button type="button" onclick="register()">新規登録</button>
+      <button type="button" onclick="resetPassword()">パスワードを忘れた場合</button>
+    </form>
+    <p class="note">※ 新規登録のパスワードは6文字以上です。Firebase Authenticationのメール/パスワード認証を使用します。</p>
+    <p id="authMessage" class="note" role="status" aria-live="polite"></p>
   </div>
 
   <div id="app" style="display: none;">

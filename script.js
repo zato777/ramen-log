@@ -10,25 +10,90 @@ const firebaseConfig = {
   };
   
 firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
 
 // --- グローバル変数 ---
-let currentUser = localStorage.getItem('currentUser') || null;
+let authUser = null;
+let currentUser = null;
+let currentDisplayName = "";
+let registrationInProgress = false;
 let editIndex = -1; // 編集対象のインデックス
 let userRamenList = []; // ★ 現在のユーザーのラーメン記録のみを保持
+let ramenListLoaded = false;
 let lastDeleted = null;
 let sortOrder = 'desc'; // ★ ソート順（'desc' または 'asc'）
 
 // --- イベントリスナー ---
 window.addEventListener('DOMContentLoaded', () => {
-  if (currentUser) {
-    document.querySelector(".login").style.display = "none";
-    document.getElementById("app").style.display = "block";
-    loadRamenList(); // ログイン中のユーザーのデータを読み込む
-  }
+  auth.onAuthStateChanged(async user => {
+    if (user && registrationInProgress) return;
+
+    if (user) {
+      try {
+        await user.reload();
+        if (user.emailVerified) await user.getIdToken(true);
+      } catch (error) {
+        console.error("認証状態の確認エラー:", error);
+      }
+
+      if (!user.emailVerified) {
+        try {
+          await user.sendEmailVerification();
+          setAuthMessage("メールアドレスの確認が必要です。確認メールを再送しました。受信箱をご確認ください。");
+        } catch (error) {
+          console.error("確認メール送信エラー:", error);
+          setAuthMessage("メールアドレスの確認が必要です。確認メールを再送できませんでした。時間をおいて再度ログインしてください。");
+        }
+        await auth.signOut();
+        return;
+      }
+    }
+
+    authUser = user;
+    currentUser = user ? user.uid : null;
+    currentDisplayName = user ? (user.displayName || user.email) : "";
+    document.querySelector(".login").style.display = user ? "none" : "block";
+    document.getElementById("app").style.display = user ? "block" : "none";
+    if (user) loadRamenList();
+    else {
+      userRamenList = [];
+      ramenListLoaded = false;
+      applyFiltersAndSort();
+    }
+    updateCurrentUserDisplay();
+  });
   updateCurrentUserDisplay();
-  
+
+  document.getElementById("authForm").addEventListener("submit", event => {
+    event.preventDefault();
+    login();
+  });
+  document.querySelectorAll(".password-reveal").forEach(button => {
+    const passwordInput = document.getElementById(button.dataset.passwordTarget);
+    const setVisibility = visible => {
+      passwordInput.type = visible ? "text" : "password";
+      button.setAttribute("aria-pressed", String(visible));
+    };
+
+    button.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      setVisibility(true);
+      button.setPointerCapture(event.pointerId);
+    });
+    ["pointerup", "pointercancel", "lostpointercapture", "pointerleave", "blur"].forEach(eventName => {
+      button.addEventListener(eventName, () => setVisibility(false));
+    });
+    button.addEventListener("keydown", event => {
+      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+        event.preventDefault();
+        setVisibility(true);
+      }
+    });
+    button.addEventListener("keyup", event => {
+      if (event.key === " " || event.key === "Enter") setVisibility(false);
+    });
+  });
   document.getElementById("ramenForm").addEventListener("submit", handleFormSubmit);
   document.getElementById("searchInput").addEventListener("input", applyFiltersAndSort);
   document.getElementById("sortSelect").addEventListener("change", applyFiltersAndSort);
@@ -37,60 +102,92 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- 認証関連 ---
-function login() {
-  const username = document.getElementById("username").value.trim();
-  if (!username) return alert("ユーザー名を入力してください");
-
-  currentUser = username;
-  localStorage.setItem('currentUser', currentUser);
-
-  document.querySelector(".login").style.display = "none";
-  document.getElementById("app").style.display = "block";
-  loadRamenList();
-  updateCurrentUserDisplay();
+async function login() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    setAuthMessage("");
+  } catch (error) {
+    console.error("ログインエラー:", error);
+    setAuthMessage("ログインできませんでした。メールアドレスとパスワードを確認してください。");
+  }
 }
 
-function logout() {
-  currentUser = null;
-  localStorage.removeItem('currentUser');
-  userRamenList = []; // ユーザーデータをクリア
-  
-  document.getElementById("app").style.display = "none";
-  document.querySelector(".login").style.display = "block";
-  document.getElementById("username").value = "";
-  
-  resetForm();
-  updateCurrentUserDisplay();
-  renderRamenList([]); // 表示をクリア
+async function register() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const passwordConfirm = document.getElementById("passwordConfirm").value;
+  const displayName = document.getElementById("displayName").value.trim();
+  if (!displayName) return alert("新規登録時は表示名を入力してください。");
+  if (password.length < 6) return alert("パスワードは6文字以上で入力してください。");
+  if (password !== passwordConfirm) return alert("パスワードが一致しません。");
+
+  registrationInProgress = true;
+  try {
+    const credential = await auth.createUserWithEmailAndPassword(email, password);
+    await credential.user.updateProfile({ displayName });
+    await credential.user.sendEmailVerification();
+    setAuthMessage(`確認メールを${email}に送りました。メール内のリンクを開いてからログインしてください。`);
+    document.getElementById("password").value = "";
+    document.getElementById("passwordConfirm").value = "";
+  } catch (error) {
+    console.error("新規登録エラー:", error);
+    setAuthMessage("登録または確認メールの送信に失敗しました。入力内容とFirebase Authenticationの設定を確認してください。");
+  } finally {
+    registrationInProgress = false;
+    if (auth.currentUser && !auth.currentUser.emailVerified) await auth.signOut();
+  }
+}
+
+async function resetPassword() {
+  const email = document.getElementById("email").value.trim();
+  if (!email) return setAuthMessage("再設定メールを送るメールアドレスを入力してください。");
+
+  try {
+    await auth.sendPasswordResetEmail(email);
+    setAuthMessage("パスワード再設定メールを送信しました。受信箱と迷惑メールをご確認ください。");
+  } catch (error) {
+    console.error("パスワード再設定メール送信エラー:", error);
+    setAuthMessage("再設定メールを送信できませんでした。メールアドレスとFirebase Authenticationの設定を確認してください。");
+  }
+}
+
+function setAuthMessage(message) {
+  document.getElementById("authMessage").textContent = message;
+}
+
+async function logout() {
+  try {
+    await auth.signOut();
+  } catch (error) {
+    console.error("ログアウトエラー:", error);
+    alert("ログアウトできませんでした。");
+  }
 }
 
 function updateCurrentUserDisplay() {
-  document.getElementById("currentUserDisplay").textContent = currentUser || "未ログイン";
+  document.getElementById("currentUserDisplay").textContent = currentDisplayName || "未ログイン";
 }
 
 async function changeUsername() {
   const newUsername = document.getElementById("newUsername").value.trim();
   if (!newUsername) return alert("新しいユーザー名を入力してください");
-  if (newUsername === currentUser) return alert("現在のユーザー名と同じです");
-  if (!currentUser) return;
+  if (newUsername === currentDisplayName) return alert("現在のユーザー名と同じです");
+  if (!currentUser || !authUser) return;
 
-  if (!confirm(`ユーザー名を「${currentUser}」から「${newUsername}」に変更しますか？\n（注意：現在の記録が新しい名前に引き継がれます）`)) {
+  if (!confirm(`表示名を「${currentDisplayName}」から「${newUsername}」に変更しますか？`)) {
     return;
   }
   try {
-    const oldUserRef = db.collection("ramenLogs").doc(currentUser);
-    const doc = await oldUserRef.get();
-    if (doc.exists) {
-      const data = doc.data();
-      await db.collection("ramenLogs").doc(newUsername).set(data);
-      await oldUserRef.delete();
-    }
-    currentUser = newUsername;
-    localStorage.setItem('currentUser', currentUser);
+    const userRef = db.collection("ramenLogs").doc(currentUser);
+    await authUser.updateProfile({ displayName: newUsername });
+    await userRef.set({ ownerUid: currentUser, username: newUsername, list: userRamenList });
+    currentDisplayName = newUsername;
     updateCurrentUserDisplay();
     loadRamenList();
     document.getElementById("newUsername").value = "";
-    alert("ユーザー名を変更しました。");
+    alert("表示名を変更しました。");
   } catch (error) {
     console.error("ユーザー名変更エラー:", error);
     alert("ユーザー名の変更に失敗しました。");
@@ -98,16 +195,20 @@ async function changeUsername() {
 }
 
 async function deleteAccount() {
-  if (!currentUser) return;
-  if (confirm("本当にこのアカウントと全ての記録を削除しますか？\nこの操作は取り消せません。")) {
-    try {
-      await db.collection("ramenLogs").doc(currentUser).delete();
-      alert("アカウントを削除しました。");
-      logout();
-    } catch (error) {
-      console.error("アカウント削除エラー:", error);
-      alert("アカウントの削除に失敗しました。");
-    }
+  if (!currentUser || !authUser) return;
+  if (!confirm("本当にこのアカウントと全ての記録を削除しますか？\nこの操作は取り消せません。")) return;
+  const password = prompt("確認のため、パスワードを入力してください。");
+  if (!password) return;
+
+  try {
+    const credential = firebase.auth.EmailAuthProvider.credential(authUser.email, password);
+    await authUser.reauthenticateWithCredential(credential);
+    await db.collection("ramenLogs").doc(currentUser).delete();
+    await authUser.delete();
+    alert("アカウントを削除しました。");
+  } catch (error) {
+    console.error("アカウント削除エラー:", error);
+    alert("アカウントの削除に失敗しました。パスワードや通信状態を確認してください。");
   }
 }
 
@@ -115,17 +216,31 @@ async function deleteAccount() {
 async function loadRamenList() {
   if (!currentUser) return;
 
-  const userRef = db.collection("ramenLogs").doc(currentUser);
-  const doc = await userRef.get();
+  ramenListLoaded = false;
+  try {
+    const userRef = db.collection("ramenLogs").doc(currentUser);
+    const doc = await userRef.get();
 
-  if (doc.exists) {
-    // 取得したリストをグローバル変数に保存
-    userRamenList = doc.data().list || [];
-  } else {
-    // ユーザーが初めてログインした場合
+    if (doc.exists) {
+      userRamenList = doc.data().list || [];
+        currentDisplayName = doc.data().username || authUser.displayName || authUser.email || "";
+    } else {
+      userRamenList = [];
+      await userRef.set({
+        ownerUid: currentUser,
+        username: authUser.displayName || authUser.email,
+        list: []
+      });
+    }
+    ramenListLoaded = true;
+    updateCurrentUserDisplay();
+    applyFiltersAndSort();
+  } catch (error) {
+    console.error("記録の読み込みエラー:", error);
     userRamenList = [];
+    document.getElementById("ramenList").innerHTML =
+      "<p>記録を読み込めませんでした。Firestoreのアクセス権限や接続を確認してください。既存の記録は変更していません。</p>";
   }
-  applyFiltersAndSort(); // フィルターとソートを適用して描画
 }
 
 // --- データ描画 (★修正点①：シンプル化) ---
@@ -191,6 +306,10 @@ function renderRamenList(list) {
 // 【差し替え】この関数を丸ごと置き換えてください
 async function handleFormSubmit(e) {
   e.preventDefault();
+  if (!ramenListLoaded) {
+    return alert("記録を読み込めていないため保存できません。Firestoreのアクセス権限や接続を確認してください。");
+  }
+
   const shopName = document.getElementById("shopName").value;
   if (!shopName) return alert("店名を入力してください");
 
@@ -231,7 +350,7 @@ async function handleFormSubmit(e) {
     }
 
     if (photoFile) {
-      photoURL = await uploadPhoto(photoFile);
+      photoURL = await photoToDataURL(photoFile);
     }
     
     const ramenData = {
@@ -247,14 +366,21 @@ async function handleFormSubmit(e) {
       updatedAt: new Date() 
     };
 
+    const nextRamenList = [...userRamenList];
     if (editIndex === -1) {
-      userRamenList.push(ramenData);
+      nextRamenList.push(ramenData);
     } else {
-      userRamenList[editIndex] = ramenData;
+      nextRamenList[editIndex] = ramenData;
+    }
+
+    const documentSize = new TextEncoder().encode(JSON.stringify({ list: nextRamenList })).length;
+    if (documentSize > 900 * 1024) {
+      throw new Error("写真を含む記録がFirestoreの保存上限に近づいています。写真を小さくするか、不要な記録を削除してください。");
     }
 
     const userRef = db.collection("ramenLogs").doc(currentUser);
-    await userRef.set({ list: userRamenList });
+    await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: nextRamenList });
+    userRamenList = nextRamenList;
 
     alert(editIndex === -1 ? "記録しました！" : "更新しました！");
     resetForm();
@@ -362,7 +488,7 @@ async function deleteRamen(index) {
 
     // DBに反映
     const userRef = db.collection("ramenLogs").doc(currentUser);
-    await userRef.set({ list: userRamenList });
+    await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: userRamenList });
     
     applyFiltersAndSort(); // 再描画
     showUndo();
@@ -404,7 +530,7 @@ async function undoDelete() {
   
   // DBに反映
   const userRef = db.collection("ramenLogs").doc(currentUser);
-  await userRef.set({ list: userRamenList });
+  await userRef.set({ ownerUid: currentUser, username: currentDisplayName, list: userRamenList });
 
   alert("復元しました。");
   applyFiltersAndSort(); // 再描画
@@ -452,14 +578,14 @@ function calculateTotal(menuItems) {
   return menuItems.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
 }
 
-async function uploadPhoto(file) {
-  if (!currentUser) throw new Error("User not logged in");
-  const uploadFile = await compressPhoto(file);
-  const filePath = `ramen_photos/${currentUser}/${Date.now()}_${file.name}`;
-  const fileRef = storage.ref(filePath);
-  await fileRef.put(uploadFile);
-  const url = await fileRef.getDownloadURL();
-  return url;
+async function photoToDataURL(file) {
+  const compressedFile = await compressPhoto(file);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("写真を読み込めませんでした。"));
+    reader.readAsDataURL(compressedFile);
+  });
 }
 
 async function compressPhoto(file) {
@@ -471,14 +597,14 @@ async function compressPhoto(file) {
     image.src = imageURL;
     await image.decode();
 
-    const maxDimension = 1600;
+    const maxDimension = 1200;
     const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(image.width * scale);
     canvas.height = Math.round(image.height * scale);
     canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
 
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.75));
     if (!blob || blob.size >= file.size) return file;
 
     const filename = file.name.replace(/\.[^.]+$/, "") + ".jpg";
